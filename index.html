@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Учет оплаты обучения</title><link rel="stylesheet" href="/style.css">
+<main><h1>Учет оплаты обучения</h1><p>Учебный локальный стенд · только вымышленные данные · суммы в рублях</p>
+<p id="summary"></p><p id="message" role="status"></p>
+<label>Поиск по коду студента или договору <input id="search" type="search"></label>
+<p><a href="/export.csv" download="tuition.csv">Скачать реестр CSV</a></p>
+<div class="scroll"><table><thead><tr><th>ID</th><th>Студент</th><th>Договор</th><th>Начислено</th><th>Оплачено</th><th>Остаток</th><th>Срок</th><th>Статус</th></tr></thead><tbody id="rows"></tbody></table></div>
+<section><form id="charge"><h2>Новое начисление</h2><label>Код студента<input name="student" required maxlength="100"></label><label>Договор<input name="contract" required maxlength="50"></label><label>Сумма<input name="amount" type="number" min="0.01" max="100000000" step="0.01" required></label><label>Срок оплаты<input name="due" type="date" required></label><button>Добавить начисление</button></form>
+<form id="payment"><h2>Регистрация оплаты</h2><label>ID начисления<input name="charge_id" type="number" min="1" step="1" required></label><label>Сумма<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Дата оплаты<input name="paid" type="date" required></label><label>Уникальный номер платежа<input name="reference" required maxlength="100"></label><button>Зарегистрировать оплату</button></form></section></main><script src="/app.js"></script></html>
