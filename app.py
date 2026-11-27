@@ -16,11 +16,23 @@ def kopecks(value):
         amount = Decimal(str(value))
         if not amount.is_finite() or amount <= 0 or amount > Decimal('100000000'):
             raise ValueError('Сумма должна быть больше нуля и не более 100 млн рублей')
-        if amount * 100 != (amount * 100).to_integral_value():
+        rounded = amount.quantize(Decimal('0.01'))
+        if amount != rounded:
             raise ValueError('Допускается не более двух знаков после запятой')
-        return int(amount * 100)
+        return int(rounded * 100)
     except InvalidOperation as exc:
         raise ValueError('Некорректная сумма') from exc
+
+
+def calendar_date(value):
+    try:
+        return date.fromisoformat(value).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Укажите корректную дату в формате ГГГГ-ММ-ДД') from exc
+
+
+def invalid_json_constant(value):
+    raise ValueError('Недопустимое числовое значение')
 
 
 class Ledger:
@@ -47,15 +59,21 @@ class Ledger:
         student, contract = student.strip(), contract.strip()
         if not 1 <= len(student) <= 100 or not 1 <= len(contract) <= 50:
             raise ValueError('Укажите код студента и номер договора допустимой длины')
-        due = date.fromisoformat(due).isoformat()
+        due = calendar_date(due)
         with self.db:
             c = self.db.execute('INSERT INTO charges(student,contract,amount,due) VALUES(?,?,?,?)',
                                 (student, contract, kopecks(amount), due))
             return c.lastrowid
 
     def pay(self, charge_id, amount, paid, reference):
+        if isinstance(charge_id, str):
+            charge_id = charge_id.strip()
+            if charge_id.isascii() and charge_id.isdecimal() and len(charge_id) <= 19:
+                charge_id = int(charge_id)
+        if type(charge_id) is not int or not 0 < charge_id <= 9223372036854775807:
+            raise ValueError('ID начисления должен быть положительным целым числом допустимого диапазона')
         cents = kopecks(amount)
-        paid = date.fromisoformat(paid).isoformat()
+        paid = calendar_date(paid)
         if not isinstance(reference, str):
             raise ValueError('Номер платежа должен быть строкой')
         reference = reference.strip()
@@ -92,7 +110,6 @@ class Ledger:
         w = csv.writer(out, delimiter=';')
         w.writerow(['ID', 'Код студента', 'Договор', 'Начислено', 'Оплачено', 'Остаток', 'Срок', 'Статус'])
         for r in self.rows():
-            # Spreadsheet programs must treat user-supplied identifiers as text.
             def csv_text(value):
                 return "'" + value if value.lstrip().startswith(('=', '+', '-', '@')) else value
             w.writerow([r['id'], csv_text(r['student']), csv_text(r['contract']), f"{r['amount']/100:.2f}",
@@ -131,27 +148,35 @@ def handler(ledger):
                 self.respond(404, '{}')
 
         def do_POST(self):
-            # Browser mutations must originate from this local interface.
             expected = 'http://' + self.headers.get('Host', '')
             if self.headers.get('Origin') != expected:
                 self.respond(403, json.dumps({'error': 'Недопустимый источник запроса'}))
                 return
             try:
-                size = int(self.headers.get('Content-Length', '0'))
+                try:
+                    size = int(self.headers.get('Content-Length', '0'))
+                except ValueError as exc:
+                    raise ValueError('Недопустимый размер запроса') from exc
                 if not 0 < size <= 8192:
                     raise ValueError('Недопустимый размер запроса')
-                data = json.loads(self.rfile.read(size))
+                try:
+                    data = json.loads(self.rfile.read(size), parse_float=Decimal,
+                                      parse_constant=invalid_json_constant)
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise ValueError('Некорректный JSON в кодировке UTF-8') from exc
                 if not isinstance(data, dict):
                     raise ValueError('Ожидается JSON-объект')
                 if self.path == '/api/charges':
                     ledger.charge(data['student'], data['contract'], data['amount'], data['due'])
                 elif self.path == '/api/payments':
-                    ledger.pay(int(data['charge_id']), data['amount'], data['paid'], data['reference'])
+                    ledger.pay(data['charge_id'], data['amount'], data['paid'], data['reference'])
                 else:
                     self.respond(404, '{}')
                     return
                 self.respond(201, '{"ok":true}')
-            except (ValueError, KeyError, TypeError, UnicodeDecodeError, sqlite3.IntegrityError) as exc:
+            except KeyError:
+                self.respond(400, json.dumps({'error': 'Не заполнены обязательные поля'}, ensure_ascii=False))
+            except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
                 message = 'Договор или номер платежа уже существует' if isinstance(exc, sqlite3.IntegrityError) else str(exc)
                 self.respond(400, json.dumps({'error': message}, ensure_ascii=False))
 

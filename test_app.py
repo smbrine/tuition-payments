@@ -41,9 +41,23 @@ class LedgerTests(unittest.TestCase):
 
     def test_money_validation(self):
         self.assertEqual(kopecks('0.01'), 1)
-        for value in ['0', '-1', '1.001', 'NaN', 'Infinity', 'abc', '100000001']:
+        self.assertEqual(kopecks('1.2300'), 123)
+        self.assertEqual(kopecks('100000000'), 10000000000)
+        for value in ['0', '-1', '1.001', 'NaN', 'Infinity', 'abc', '100000001',
+                      '0.0100000000000000000000000000000000000001',
+                      '1.00000000000000000000000000001', '1e-1000000']:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 kopecks(value)
+
+    def test_payment_identifier_validation(self):
+        for ident in [True, False, 1.9, 1.0, 0, -1, 2**63, float('inf'), None,
+                      '1.9', '1e0', '', '9' * 5000, [], {}]:
+            with self.subTest(ident=ident):
+                with self.assertRaises(ValueError):
+                    self.ledger.pay(ident, '100', '2026-11-01', 'P-1')
+                self.assertEqual(self.ledger.rows()[0]['paid'], 0)
+        self.ledger.pay(str(self.ident), '100', '2026-11-01', 'P-1')
+        self.assertEqual(self.ledger.rows()[0]['paid'], 10000)
 
     def test_due_date_boundary(self):
         self.assertEqual(self.ledger.rows('2026-11-15')[0]['status'], 'Ожидает оплаты')
@@ -104,7 +118,10 @@ class HTTPTests(unittest.TestCase):
         self.thread.join(timeout=5)
 
     def post(self, path, data, origin=None):
-        request = Request(self.base + path, data=json.dumps(data).encode(),
+        return self.post_body(path, json.dumps(data).encode(), origin)
+
+    def post_body(self, path, body, origin=None):
+        request = Request(self.base + path, data=body,
                           headers={'Content-Type': 'application/json',
                                    'Origin': origin or self.base})
         try:
@@ -125,6 +142,44 @@ class HTTPTests(unittest.TestCase):
             self.assertIn('Учет оплаты обучения', response.read().decode())
         with urlopen(self.base + '/export.csv', timeout=5) as response:
             self.assertIn('EDU-003', response.read().decode())
+
+    def test_invalid_payment_identifiers_do_not_change_balance(self):
+        self.post('/api/charges', dict(student='ST-003', contract='EDU-003',
+                                      amount='1000', due='2026-12-01'))
+        for ident in [1.9, 1.0, True, 2**63, float('inf'), '9' * 5000]:
+            with self.subTest(ident=ident):
+                status, data = self.post('/api/payments', dict(charge_id=ident, amount='1',
+                                         paid='2026-11-27', reference='P-003'))
+                self.assertEqual(status, 400)
+                self.assertIn('error', data)
+        with urlopen(self.base + '/api/charges', timeout=5) as response:
+            self.assertEqual(json.load(response)[0]['paid'], 0)
+        self.assertEqual(self.post('/api/payments', dict(charge_id='1', amount='1',
+                                 paid='2026-11-27', reference='P-003'))[0], 201)
+
+    def test_json_amounts_preserve_decimal_precision(self):
+        for amount in ['1.00000000000000000000000000001', 'NaN', 'Infinity']:
+            with self.subTest(amount=amount):
+                body = ('{"student":"ST-003","contract":"EDU-003",'
+                        '"due":"2026-12-01","amount":' + amount + '}').encode()
+                self.assertEqual(self.post_body('/api/charges', body)[0], 400)
+        with urlopen(self.base + '/api/charges', timeout=5) as response:
+            self.assertEqual(json.load(response), [])
+        self.assertEqual(self.post_body('/api/charges',
+                         b'{"student":"ST-003","contract":"EDU-003",'
+                         b'"due":"2026-12-01","amount":1.23}')[0], 201)
+        with urlopen(self.base + '/api/charges', timeout=5) as response:
+            self.assertEqual(json.load(response)[0]['amount'], 123)
+
+    def test_validation_messages_are_in_russian(self):
+        for body, expected in [(b'{broken', 'Некорректный JSON'),
+                               (b'{}', 'Не заполнены обязательные поля'),
+                               (b'{"student":"S","contract":"C","amount":"1",'
+                                b'"due":"2026-02-30"}', 'Укажите корректную дату')]:
+            with self.subTest(body=body):
+                status, data = self.post_body('/api/charges', body)
+                self.assertEqual(status, 400)
+                self.assertIn(expected, data['error'])
 
     def test_invalid_body_and_cross_origin(self):
         self.assertEqual(self.post('/api/charges', [])[0], 400)

@@ -48,16 +48,20 @@ python3 -m unittest -v
 
 API: `GET /api/charges`, `POST /api/charges`, `POST /api/payments`, `GET /export.csv`. Суммы во входных запросах задаются в рублях (предпочтительно строкой, например `"1000.50"`), в JSON реестра — целыми копейками. POST-запросы требуют заголовок `Origin`, совпадающий с адресом локального сервера.
 
-## Публикация на GitHub
+## Репозиторий GitHub
 
-Создайте пустой репозиторий `tuition-payments` в своем аккаунте GitHub. Из папки проекта выполните команды, заменив `YOUR_USERNAME` своим логином:
+Исходный код: https://github.com/smbrine/tuition-payments
+
+Репозиторий закрытый. Для проверки преподавателю потребуется доступ к репозиторию либо отдельно предоставленный архив исходников.
 
 ```sh
-git remote add origin https://github.com/YOUR_USERNAME/tuition-payments.git
-git push -u origin main
+git clone https://github.com/smbrine/tuition-payments.git
+cd tuition-payments
+python3 -m unittest -v
+python3 app.py --demo
 ```
 
-Исходники готовы к публикации; для проверки преподаватель может клонировать репозиторий и выполнить команды запуска выше. GitHub Pages не запускает Python-сервер — приложение нужно запускать локально.
+Откройте http://127.0.0.1:8080. GitHub Pages не запускает Python-сервер — приложение нужно запускать локально.
 
 ## Границы применения
 
